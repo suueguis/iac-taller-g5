@@ -141,14 +141,24 @@ CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
 **Mismo objetivo de dos formas**
 
 - Lista imperativa de pasos en orden:
-- Una sola frase declarativa:
+  1. Comprobar que Docker Desktop está abierto y que su motor está corriendo.
+  2. Ejecutar `docker run -d --name clickops-g5 -p 8090:80 nginx:1.27-alpine`, que descarga la imagen si hace falta y arranca el contenedor.
+  3. Abrir `http://localhost:8090` y verificar que aparece la página de bienvenida de nginx.
+  4. Si hay que repetirlo, borrar antes el contenedor con `docker rm -f clickops-g5`.
+- Una sola frase declarativa: «Queremos un servidor nginx 1.27 llamado clickops-g5 que responda en el puerto 8090 del equipo.»
 
 ### Respuestas
 1. ¿Qué error produjo el segundo `docker run`? ¿Qué dice eso sobre la idempotencia de un comando imperativo?
 
+El segundo `docker run` falló con `Conflict. The container name "/clickops-g5" is already in use` y terminó con código de salida 125, porque el nombre ya existía y Docker no creó nada. Cuando probamos con otro nombre, `clickops-g5-2`, y el mismo puerto, Docker sí creó el contenedor pero no pudo arrancarlo (`Bind for 0.0.0.0:8090 failed: port is already allocated`), y `docker ps -a` lo mostró en estado `Created`. Eso nos dice que un comando imperativo no es idempotente: ejecutarlo dos veces no deja el mismo resultado que ejecutarlo una, sino un error o un contenedor a medias que hubo que limpiar a mano (Díaz Bautista, s. f.).
+
 2. Si otro grupo necesitara mañana un servidor idéntico, ¿qué tendrían que contarle y dónde quedó registrado lo que hicieron?
 
+Tendríamos que contarles de memoria el comando completo: la imagen y su versión (`nginx:1.27-alpine`), el nombre del contenedor y el mapeo de puertos (8090 a 80). Lo que hicimos no quedó registrado en ningún archivo de configuración, solo en el historial de la terminal y en la memoria de quien lo escribió; la única constancia es esta bitácora, copiada a mano. Es justo lo que la clase llama ClickOps (Díaz Bautista, s. f.).
+
 3. ¿Cuáles de los cuatro puntos de la diapositiva «Por qué duele» vivieron en esta fase?
+
+Vivimos los cuatro, cada uno a su manera. Fue lento y propenso a errores: el intento con otro nombre y el mismo puerto dejó `clickops-g5-2` creado pero sin arrancar y hubo que borrarlo a mano. Fue imposible de reproducir igual dos veces, porque el mismo comando funcionó la primera vez y falló la segunda. No quedó historial de quién creó o borró los contenedores ni cuándo, y el conocimiento se quedó en quien tecleó el comando, porque la imagen, el puerto y el nombre solo estaban en su terminal (Díaz Bautista, s. f., «Por qué duele»).
 
 ---
 
@@ -316,13 +326,23 @@ nothing added to commit but untracked files present (use "git add" to track)
 ### Respuestas
 1. Pidieron un solo servidor. ¿Cuántos recursos creó el plan y por qué?
 
+El plan dijo `Plan: 2 to add, 0 to change, 0 to destroy`. Los dos recursos fueron `docker_image.nginx` y `docker_container.web`: aunque pedimos un solo servidor, Docker necesita primero la imagen y después el contenedor que se crea a partir de ella. La salida `url` no cuenta como recurso, por eso apareció aparte, en «Changes to Outputs».
+
 2. El contenedor usa `docker_image.nginx.image_id`. ¿Qué orden de creación impone esa referencia? Relaciónenlo con la diapositiva «Qué ocurre cuando aplicas».
+
+La referencia obliga a crear la imagen antes que el contenedor, porque el contenedor necesita ese `image_id`, que solo se conoce cuando la imagen ya existe. En el `apply` se vio en ese orden: `docker_image.nginx: Creating...` y `Creation complete`, y solo después `docker_container.web: Creating...`. Es lo que muestra la diapositiva «Qué ocurre cuando aplicas»: Terraform arma el plan y respeta las dependencias antes de llamar al provider (Díaz Bautista, s. f.).
 
 3. ¿Qué descargó `terraform init`, dónde lo guardó y para qué sirve `.terraform.lock.hcl`?
 
+`terraform init` descargó el provider `kreuzwerker/docker` en su versión 4.7.0 (nuestro código pedía `~> 4.6`) y lo guardó en la carpeta `.terraform/`, que no se sube a Git. También creó `.terraform.lock.hcl`, donde queda registrada la versión exacta elegida y sus checksums, para que cualquier integrante que ejecute `init` use el mismo provider; por eso este archivo sí se sube al repositorio (HashiCorp, s. f.-b).
+
 4. De los cuatro bloques de la diapositiva «Cómo se escribe Terraform», ¿cuál no aparece todavía en su archivo?
 
+En nuestro `main.tf` de la Fase 2 aparecen `terraform`, `provider`, `resource` y `output`, pero no hay ningún bloque `variable`: el nombre, la imagen y el puerto están escritos directamente en el código (por ejemplo `external = 8080`). Tampoco hay todavía `locals` ni `data`; todo eso llega en la Fase 5 (Díaz Bautista, s. f., «Cómo se escribe Terraform»).
+
 5. Comparen con la Fase 1: ¿dónde quedó registrado ahora lo que hicieron?
+
+Ahora quedó registrado en `infra/main.tf`, dentro del repositorio de Git, en el commit `fase-2: primer despliegue`. Cualquiera puede leer qué servidor describimos, volver a crearlo con `terraform apply` y ver con `git log` quién lo hizo y cuándo, algo que en la Fase 1 solo existía en la terminal (Díaz Bautista, s. f.).
 
 ---
 
@@ -590,13 +610,23 @@ Server: nginx/1.28.3
 ### Respuestas
 1. ¿Qué respondió Terraform en el paso 1 y en qué se diferencia del segundo `docker run` de la Fase 1?
 
+Respondió `No changes. Your infrastructure matches the configuration.` y cerró con `Apply complete! Resources: 0 added, 0 changed, 0 destroyed.` Terraform comparó el código, el state y lo que había en Docker, vio que coincidían y no hizo nada. El segundo `docker run` de la Fase 1, en cambio, falló con un conflicto de nombre; esa diferencia es la idempotencia (Díaz Bautista, s. f.).
+
 2. ¿Qué datos guarda el state que no escribieron en `main.tf`? ¿Para qué los necesita Terraform?
+
+`terraform state show docker_container.web` mostró datos que nunca escribimos en `main.tf`: el `id` completo del contenedor, el `hostname`, la IP `172.17.0.3`, el gateway `172.17.0.1`, la MAC, el `command`, el `entrypoint` y el `stop_signal`, entre otros. Terraform los guarda para saber qué objeto real de Docker corresponde a cada recurso del código y poder compararlos en el siguiente `plan`, sin tener que adivinar ni volver a crear lo que ya existe (HashiCorp, s. f.-a).
 
 3. ¿Por qué el cambio de imagen reemplazó el contenedor en lugar de modificarlo? Relaciónenlo con «Infraestructura mutable vs. inmutable».
 
+Al cambiar `nginx:1.27-alpine` por `nginx:1.28-alpine`, el plan mostró `-/+` y `forces replacement` en el `name` de `docker_image.nginx` y en el `image` de `docker_container.web`, con `Plan: 2 to add, 0 to change, 2 to destroy`. Un contenedor ya creado no cambia de imagen: Terraform destruyó el viejo y creó uno nuevo con la 1.28 (la respuesta HTTP pasó a decir nginx/1.28.3). Es la infraestructura inmutable, que se reemplaza en vez de parchearse, a diferencia de la mutable, donde se entra al servidor y se modifica (Díaz Bautista, s. f., «Infraestructura mutable vs. inmutable»).
+
 4. ¿Cómo cambió `serial` después del `apply` y qué creen que representa?
 
+El `serial` valía 3 después de la Fase 2, pasó a 4 con un `apply` que no cambió ningún recurso y llegó a 9 después del reemplazo por la imagen 1.28; un `plan` solo, en cambio, no lo movió. Entendemos que `serial` es un contador de versiones del state: sube con cada `apply`, incluso cuando no cambia ningún recurso, porque Terraform vuelve a guardar el state, y sirve para saber qué copia es más reciente (HashiCorp, s. f.-a). El salto de 4 a 9 coincide con que el reemplazo hizo varias operaciones (destruir contenedor e imagen, crear imagen y contenedor), pero no comprobamos si cada una suma exactamente uno.
+
 5. Piensen en un proyecto real con bases de datos: ¿qué riesgo habría si este archivo se subiera a Git?
+
+El state guarda en texto plano todos los atributos de los recursos, y en un proyecto real eso incluye contraseñas y cadenas de conexión de las bases de datos. Si el archivo entra a Git queda en el historial, donde es casi imposible de borrar y lo puede ver cualquiera con acceso al repositorio (HashiCorp, s. f.-c). Por eso nuestro `.gitignore` excluye `*.tfstate` y `.terraform/`, y en la Fase 7 el state pasó a un backend remoto; además, dos personas con copias distintas del state podrían pisarse.
 
 ---
 
@@ -838,9 +868,15 @@ No changes. Your infrastructure matches the configuration.
 ### Respuestas
 1. ¿Por qué Terraform no detectó el experimento C? ¿Qué tipo de herramienta de la diapositiva «Aprovisionar ≠ configurar» se encarga de ese nivel?
 
+Con `docker exec` cambiamos el `index.html` dentro del contenedor: `curl` mostró `<h1>Modificado a mano - g5</h1>`, pero `terraform plan` respondió `No changes`. Terraform solo compara lo que el provider lee de Docker (nombre, imagen, puertos, estado del contenedor), y el contenido de un archivo interno no forma parte de esa descripción. Ese nivel, lo que hay instalado o configurado dentro de lo que ya existe, lo cubren las herramientas de gestión de configuración (por ejemplo Ansible), que la diapositiva «Aprovisionar ≠ configurar» distingue de las de aprovisionamiento, como Terraform (Díaz Bautista, s. f.).
+
 2. ¿Por qué `-replace` es una corrección coherente con la infraestructura inmutable?
 
+Corregimos con `terraform apply -replace=docker_container.web`: el plan dijo `will be replaced, as requested` (`Plan: 1 to add, 0 to change, 1 to destroy`) y volvió a aparecer la página de bienvenida de nginx. No entramos a deshacer el cambio dentro del servidor: lo descartamos y creamos uno nuevo desde lo que dice el código. Esa es la lógica de la infraestructura inmutable, donde nada se arregla a mano sobre lo que ya existe (Díaz Bautista, s. f.).
+
 3. En un equipo real, ¿cómo detectarían el drift sin esperar a que alguien ejecute `plan` por casualidad?
+
+Ejecutando `terraform plan` de forma automática y periódica, por ejemplo dentro de un pipeline de CI/CD, y avisando al equipo cuando aparezca cualquier diferencia entre el código y la realidad. En el experimento B, `terraform plan -refresh-only` informó justo eso (`docker_container.web has been deleted`) sin proponer acciones, y esa revisión se puede programar. Eso no habría detectado el experimento C, que `plan` no ve, así que además hay que mantener la regla de que nadie cambia la infraestructura a mano (Díaz Bautista, s. f.).
 
 ---
 
@@ -989,11 +1025,19 @@ Changes to Outputs:
 ### Respuestas
 1. `puerto` tiene un default, puede venir de `terraform.tfvars` y se pasó con `-var`. ¿Qué valor gana cuando hay varios?
 
+Gana el valor pasado con `-var`. Según la documentación, el orden de menor a mayor prioridad es el `default`, las variables de entorno `TF_VAR_`, `terraform.tfvars`, los archivos `*.auto.tfvars` y, por último, `-var` y `-var-file` (HashiCorp, s. f.-d). En nuestra práctica el `default` era 8080: con `-var="puerto=9500"` Terraform usó 9500, y con `-var="puerto=8085"` el plan mostró `external = 8080 -> 8085`. Lo que no probamos fue la precedencia frente a `terraform.tfvars`, porque el nuestro no tenía `puerto` (solo `grupo` y `mensaje`); ese punto lo tomamos de la documentación.
+
 2. ¿Qué hizo el bloque `validation` con el puerto 9500? ¿En qué se parece a la idea de Policy as Code?
+
+Con `-var="puerto=9500"` el `plan` falló con `Error: Invalid value for variable ... var.puerto is 9500` y el mensaje «El puerto debe estar entre 8000 y 8999», sin llegar a crear nada; con 8085 el plan pasó y propuso reemplazar el contenedor. Se parece a Policy as Code porque es una regla escrita como código que se evalúa sola y bloquea lo que no cumple antes de aplicar, sin que una persona tenga que acordarse de revisarla (Díaz Bautista, s. f.).
 
 3. ¿Terraform creó la red `bridge`? ¿Qué le pasará cuando el grupo ejecute `destroy`?
 
+No: el `data source` solo lee una red que Docker ya tenía. En el plan apareció como `data.docker_network.bridge: Reading... Read complete`, nunca como `will be created`. Por eso los planes de destrucción de la Fase 7 (`Plan: 0 to add, 0 to change, 6 to destroy`) y de la Fase 9 (2, 6 y 6 recursos) no incluyeron la red `bridge`: Terraform la consulta pero no la gestiona, así que `destroy` no la toca.
+
 4. ¿Qué ganan con `local.nombre` frente a escribir `"web-gN"` en cada lugar donde se necesita?
+
+Con `local.nombre` el nombre se define una sola vez a partir del número de grupo (`"web-g${var.grupo}"`) y se reutiliza donde haga falta; en `terraform console`, `local.nombre` dio `"web-g5"`. Si cambia el patrón o el número de grupo se edita un solo lugar y no queda ninguna copia desincronizada, que es lo que se pierde al escribir `"web-g5"` a mano en cada parte (Díaz Bautista, s. f.).
 
 ---
 
@@ -1188,11 +1232,19 @@ currently depending on hashicorp/docker, run the following command:
 ### Respuestas
 1. Anoten la línea `Plan:` del paso 8. ¿Qué se destruyó, qué se creó y por qué?
 
+La línea fue `Plan: 6 to add, 0 to change, 2 to destroy`. Se destruyeron `docker_container.web` y `docker_image.nginx`, porque al pasar al módulo ya no estaban en el código raíz (`is not in configuration`). Se crearon seis recursos, la imagen y el contenedor de cada uno de los tres usos del módulo: `tienda-g5` en el puerto 8081, `blog-g5` en el 8082 y `docs-g5` en el 8083. Por eso desapareció `web-g5`, el del puerto 8080.
+
 2. ¿Qué error obtendrían si el módulo no tuviera `versions.tf`?
+
+Lo probamos con `terraform init` en una copia temporal sin `modules/sitio_web/versions.tf` y falló con `Error: Failed to query available provider packages`, diciendo que el registro `does not have a provider named registry.terraform.io/hashicorp/docker` y sugiriendo «Did you intend to use kreuzwerker/docker?». Sin ese archivo el módulo no declara de dónde viene el provider y Terraform asume `hashicorp/docker`, que no existe.
 
 3. Si mañana hay que agregar una etiqueta a todos los sitios, ¿cuántos archivos tocan con módulo? ¿Cuántos bloques habrían tocado copiando y pegando?
 
+Con módulo tocaríamos un solo archivo, `infra/modules/sitio_web/main.tf`, porque ahí está la única definición del contenedor y el cambio llega a los tres sitios. Copiando y pegando habríamos tenido que editar tres bloques de contenedor, uno por sitio, y alguno podría haber quedado distinto de los otros (Díaz Bautista, s. f.).
+
 4. ¿Qué necesitaría otro grupo para usar su módulo sin copiar la carpeta?
+
+Necesitaría que el módulo estuviera publicado en un lugar accesible, por ejemplo en su propio repositorio de Git, y referenciarlo desde su `source` fijando una versión, en lugar de la ruta local que usamos nosotros (`./modules/sitio_web`). Así ese grupo no copia la carpeta y recibe los cambios al actualizar la versión. En el taller solo probamos la ruta local, no un `source` remoto (Díaz Bautista, s. f.).
 
 ---
 
@@ -1429,15 +1481,27 @@ $ git log --all -p -S<CLAVE>
 ### Respuestas
 1. ¿Qué respondió la terminal 2 en la prueba de bloqueo? ¿Qué problema de trabajo en equipo evita?
 
+La terminal 2 respondió `Error: Error acquiring the state lock` con `Workspace is already locked: default` y los datos del bloqueo (un ID, `Operation: OperationTypePlan` y la versión de Terraform), mientras la terminal 1 esperaba la confirmación de un `apply`. Eso evita que dos personas modifiquen el mismo state al mismo tiempo, lo que podría corromperlo o duplicar infraestructura (HashiCorp, s. f.-e). Nuestro primer intento, con `terraform console`, no bloqueó porque ese comando no toma el lock; lo repetimos con un `apply` en espera, que se cancelaba solo sin confirmar nada, y las dos «terminales» fueron dos procesos lanzados desde un mismo script.
+
 2. ¿Dónde quedó la contraseña del backend y por qué no debe estar en `main.tf`?
+
+En `main.tf` el bloque `backend "pg" {}` está vacío: la contraseña no está en ningún archivo. Vive en la variable de entorno `PG_CONN_STR`, definida solo en la terminal donde se ejecuta Terraform, y dentro del contenedor `tf-state-g5`, que la recibió en el `docker run`. En nuestra ejecución no usamos la de ejemplo de la guía: la clave se generó al azar al crear el contenedor y nunca se escribió en un archivo; en la bitácora los comandos llevan `<CLAVE>`, y con `git grep` y `git log -p -S` no encontramos nada. No debe estar en `main.tf` porque ese archivo se versiona y la contraseña quedaría para siempre en el historial de Git (Díaz Bautista, s. f.; HashiCorp, s. f.-e).
 
 3. ¿Qué filas tiene ahora la tabla `states` y cómo se relacionan con los workspaces?
 
+Antes de crear los ambientes la tabla tenía una sola fila, `1 | default`; al terminar tiene cuatro: `1 | default`, `3 | dev`, `5 | staging` y `7 | prod`. Cada fila es un workspace: la columna `name` es el nombre del workspace y ahí se guarda el state de ese ambiente, por eso cada uno queda aislado de los demás (HashiCorp, s. f.-e). Los `id` van de dos en dos porque es un contador autoincremental de Postgres y creemos que el backend consume más de un número al crear cada workspace; no lo comprobamos en su código, pero encaja con lo que vimos. La fila `default` sigue existiendo aunque su state quedó vacío después del `destroy`.
+
 4. ¿Qué error da `terraform plan` en el workspace `default` y por qué es útil que falle?
+
+Falla con `Error: Invalid index` en `locals.tf` línea 12 (`amb = local.ambientes[local.entorno]`), porque `local.entorno` vale `"default"` y el mapa `ambientes` solo tiene `dev`, `staging` y `prod`. Que falle es útil porque obliga a elegir un ambiente a propósito y evita desplegar sin querer en el lugar equivocado. Lo vimos también con `terraform validate`, que falla igual mientras el workspace activo sea `default`.
 
 5. ¿Por qué `dev` tiene un solo sitio y `staging` replica a `prod`? ¿Por qué `prod` usa otra versión de imagen?
 
+`dev` tiene un solo sitio, `tienda-g5-dev` en el puerto 8101 (2 recursos), porque sirve para probar con lo mínimo. `staging` tiene los tres sitios (`Plan: 6 to add`, puertos 8201 a 8203) porque es la réplica de producción donde se valida antes de lanzar, y `prod` también tiene tres (8301 a 8303). `prod` usa `nginx:1.27-alpine` mientras `dev` y `staging` prueban la 1.28: la versión nueva se valida primero en `staging` y solo después llega a producción (Díaz Bautista, s. f.).
+
 6. Los tres ambientes comparten código y backend. ¿Qué riesgo tiene eso frente a usar carpetas separadas por ambiente?
+
+Al compartir código y backend, un error en el código o aplicar en el workspace equivocado puede afectar a los tres ambientes, incluido `prod`, y una falla del backend los afecta a todos a la vez: un solo contenedor, `tf-state-g5`, guarda los cuatro states. Con carpetas separadas cada ambiente queda aislado, aunque a cambio se duplica código. Por eso en la Fase 9 confirmamos el ambiente con `workspace select` antes de cada `destroy` (Díaz Bautista, s. f.).
 
 ---
 
@@ -1618,6 +1682,46 @@ Validación completa: el cambio puede pasar a revisión
 ```
 (Se recortó el logotipo ASCII de Checkov. `fmt -check` no imprime nada cuando todo está bien.)
 
+Pruebas que pide la guía para ver dónde se detiene `validar.sh`. Se ejecutaron en el repositorio y después se restauraron los archivos con `git checkout`; `git status` quedó igual que antes (sin esos cambios).
+
+Prueba 1: desordenar a propósito la indentación de `infra/locals.tf` y correr `bash validar.sh`
+```
+$ git diff infra/locals.tf    (lo que se desordenó a propósito)
+-  entorno = terraform.workspace
++entorno    =    terraform.workspace
+-  desplazamiento = { tienda = 1, blog = 2, docs = 3 }
++desplazamiento    = { tienda = 1, blog = 2, docs = 3 }
+
+$ bash validar.sh
+locals.tf
+[exit 3]
+```
+`validar.sh` se detuvo en su primer comando, `terraform fmt -check -recursive`, que imprimió el archivo mal formateado (`locals.tf`) y terminó con código 3. Por el `set -e` no llegó a `validate`, a `terraform test` ni a Checkov.
+
+Prueba 2: volver a poner en `false` un valor de `seguridad/bucket.tf` (`block_public_acls`)
+```
+$ git diff seguridad/bucket.tf
+-  block_public_acls       = true
++  block_public_acls       = false
+
+$ checkov -d seguridad --check CKV_AWS_53,CKV_AWS_54,CKV_AWS_55,CKV_AWS_56   (paso 4 de validar.sh)
+Passed checks: 3, Failed checks: 1, Skipped checks: 0
+Check: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_buckets' enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+[exit 1]
+```
+En esta prueba se ejecutó solo el paso 4 de `validar.sh` (Checkov), no el script completo: los pasos 1 a 3 incluyen `terraform test`, que despliega un contenedor de verdad (`despliegue_real`), y no se repitió esa ejecución sin la aprobación del revisor. Checkov terminó con código 1 (`CKV_AWS_53` falló), y con `set -e` el script se habría detenido en ese paso, antes del mensaje final.
+
 `docker ps` al terminar la fase (solo el taller): siete sitios más el backend, sin `prueba-g5`
 ```
 NAMES               IMAGE                STATUS          PORTS
@@ -1636,29 +1740,239 @@ tf-state-g5         postgres:17-alpine   Up 22 minutes   127.0.0.1:5436->5432/tc
 ### Respuestas
 1. ¿Qué encontró cada nivel (estático, pruebas, seguridad) que los otros no podían encontrar?
 
+El análisis estático encontró lo que solo revela la forma del código: al desordenar la indentación de `locals.tf`, `terraform fmt -check` imprimió el archivo y `validar.sh` se detuvo en su primer paso, con código 3. Las pruebas comprueban comportamiento: `rechaza_puerto_fuera_de_rango` confirma que el 9500 se rechaza y `despliegue_real` verifica que el contenedor `prueba-g5` se crea de verdad. El escaneo de seguridad encontró lo que ni el formato ni las pruebas ven: con `block_public_acls` en `false`, Checkov falló `CKV_AWS_53` aunque el código fuera válido (Díaz Bautista, s. f.).
+
 2. ¿Qué vio quien observaba `docker ps` durante `despliegue_real`? ¿Por qué vale la pena un entorno desechable?
+
+Mientras corría la prueba, `docker ps` mostró un contenedor `prueba-g5` en el puerto 8999 (`Up Less than a second`) y, al terminar, `docker ps --filter name=prueba-g5` quedó vacío: `terraform test` lo destruyó solo. Como la prueba dura muy poco, con un bucle que miraba cada 0,5 segundos solo lo vimos en 1 de 4 instantes. Un entorno desechable vale la pena porque permite probar con un despliegue de verdad sin tocar ni ensuciar los ambientes reales, y se limpia solo (HashiCorp, s. f.-f).
 
 3. ¿Qué controles fallaron en el bucket y cuántos quedaron después de corregir? ¿Cuáles corresponden al ejemplo «sin buckets públicos» de la clase?
 
+Con los cuatro controles de la política del equipo fallaron `CKV_AWS_53`, `CKV_AWS_54`, `CKV_AWS_55` y `CKV_AWS_56` (0 pasaban, 4 fallaban), y pasaron los cuatro después de poner los valores en `true`. En el escaneo completo fallaban 11 controles y quedaron 6 (`CKV2_AWS_62`, `CKV2_AWS_61`, `CKV_AWS_18`, `CKV_AWS_144`, `CKV_AWS_21` y `CKV_AWS_145`), de versionado, registro de accesos, cifrado con KMS, replicación, ciclo de vida y notificaciones, que en una nube real también habría que atender. Los cuatro `CKV_AWS_53` a `56` son los del ejemplo «sin buckets públicos» de Policy as Code (Díaz Bautista, s. f.).
+
 4. ¿Qué ventaja tiene detectar un problema en el código, antes del `apply`, frente a detectarlo en la nube?
 
+Checkov analizó `seguridad/bucket.tf` sin credenciales de AWS y sin crear nada, así que el bucket público se corrigió en el archivo antes de que existiera. En la nube el mismo error ya estaría desplegado y habría que repararlo con el sistema en uso, con datos posiblemente expuestos. Detectar antes del `apply` es más barato y más seguro: se corrige un archivo y se vuelve a escanear en segundos (Díaz Bautista, s. f.).
+
 5. ¿En qué paso del pipeline de la diapositiva va `validar.sh` y qué paso humano viene después?
+
+`validar.sh` ejecuta `fmt -check`, `validate`, `terraform test` y Checkov, y termina con «el cambio puede pasar a revisión»: hace el papel de la etapa «Validar» de un pipeline de CI/CD, la que corre sola y detiene todo si algo falla (`set -e`). El paso humano que viene después es revisar el plan y aprobarlo, y solo entonces aplicar, como hicimos en cada fase con el «Aprobado» del revisor (Díaz Bautista, s. f.).
 
 ---
 
 ## Fase 9 · Auditoría cruzada y cierre
 
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
+
 ### Evidencias
-_Pegar: los planes de `destroy` de cada ambiente, `docker ps` con solo `tf-state-g5`, y `docker ps` final sin contenedores. El detalle de la auditoría va en `AUDITORIA.md`._
+El detalle de la auditoría al grupo 2 está en `AUDITORIA.md`.
+
+> Sobre la conexión al backend: los planes y los `destroy` se ejecutaron desde la terminal de Susana, donde `PG_CONN_STR` estaba definida; la contraseña no aparece en ningún archivo ni salida de esta bitácora. Los `docker ps` se recortaron al filtro `g5` porque el equipo tiene otros contenedores personales ajenos al taller, que no se tocaron.
+
+Planes de destrucción (un workspace por vez, en el orden de la guía). Se recortaron con `[...]` las líneas de atributos de cada recurso:
+
+`dev`
+```
+$ terraform workspace select dev
+Switched to workspace "dev".
+
+$ terraform plan -destroy -out=fase9-dev.tfplan
+Terraform will perform the following actions:
+
+  # module.sitio["tienda"].docker_container.this will be destroyed
+  [...]
+  # module.sitio["tienda"].docker_image.this will be destroyed
+  [...]
+
+Plan: 0 to add, 0 to change, 2 to destroy.
+
+Changes to Outputs:
+  - red_driver = "bridge" -> null
+  - urls       = {
+      - tienda-g5-dev = "http://localhost:8101"
+    } -> null
+```
+
+`staging`
+```
+$ terraform workspace select staging
+Switched to workspace "staging".
+
+$ terraform plan -destroy -out=fase9-staging.tfplan
+Terraform will perform the following actions:
+
+  # module.sitio["blog"].docker_container.this will be destroyed
+  # module.sitio["blog"].docker_image.this will be destroyed
+  # module.sitio["docs"].docker_container.this will be destroyed
+  # module.sitio["docs"].docker_image.this will be destroyed
+  # module.sitio["tienda"].docker_container.this will be destroyed
+  # module.sitio["tienda"].docker_image.this will be destroyed
+  [...]
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+
+Changes to Outputs:
+  - red_driver = "bridge" -> null
+  - urls       = {
+      - blog-g5-staging   = "http://localhost:8202"
+      - docs-g5-staging   = "http://localhost:8203"
+      - tienda-g5-staging = "http://localhost:8201"
+    } -> null
+```
+
+`prod`
+```
+$ terraform workspace select prod
+Switched to workspace "prod".
+
+$ terraform plan -destroy -out=fase9-prod.tfplan
+Terraform will perform the following actions:
+
+  # module.sitio["blog"].docker_container.this will be destroyed
+  # module.sitio["blog"].docker_image.this will be destroyed
+  # module.sitio["docs"].docker_container.this will be destroyed
+  # module.sitio["docs"].docker_image.this will be destroyed
+  # module.sitio["tienda"].docker_container.this will be destroyed
+  # module.sitio["tienda"].docker_image.this will be destroyed
+  [...]
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+
+Changes to Outputs:
+  - red_driver = "bridge" -> null
+  - urls       = {
+      - blog-g5-prod   = "http://localhost:8302"
+      - docs-g5-prod   = "http://localhost:8303"
+      - tienda-g5-prod = "http://localhost:8301"
+    } -> null
+```
+
+`terraform apply` de cada plan aprobado, en el orden `dev`, `staging`, `prod`
+```
+$ terraform workspace select dev
+Switched to workspace "dev".
+
+$ terraform apply fase9-dev.tfplan
+module.sitio["tienda"].docker_container.this: Destroying... [id=7b333687fe836d76f7b6cac44f7b3ca7a4dda91cc0a08e55af2ac66e24b5d1d3]
+module.sitio["tienda"].docker_container.this: Destruction complete after 1s
+module.sitio["tienda"].docker_image.this: Destroying... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+module.sitio["tienda"].docker_image.this: Destruction complete after 0s
+
+Apply complete! Resources: 0 added, 0 changed, 2 destroyed.
+[exit 0]
+
+$ terraform state list   (workspace dev, debe quedar vacío)
+[exit 0]
+
+$ docker ps --filter name=g5
+NAMES               IMAGE                STATUS          PORTS
+docs-g5-prod        65645c7bb6a0         Up 29 minutes   0.0.0.0:8303->80/tcp
+tienda-g5-prod      65645c7bb6a0         Up 29 minutes   0.0.0.0:8301->80/tcp
+blog-g5-prod        65645c7bb6a0         Up 29 minutes   0.0.0.0:8302->80/tcp
+tienda-g5-staging   a8b39bd9cf0f         Up 30 minutes   0.0.0.0:8201->80/tcp
+docs-g5-staging     a8b39bd9cf0f         Up 30 minutes   0.0.0.0:8203->80/tcp
+blog-g5-staging     a8b39bd9cf0f         Up 30 minutes   0.0.0.0:8202->80/tcp
+tf-state-g5         postgres:17-alpine   Up 43 minutes   127.0.0.1:5436->5432/tcp
+```
+```
+$ terraform workspace select staging
+Switched to workspace "staging".
+
+$ terraform apply fase9-staging.tfplan
+module.sitio["blog"].docker_container.this: Destroying... [id=616fbfaa90cefaa258fc4a9f0bdec9d4495d90f659995bcd16bb01e796017cb1]
+module.sitio["tienda"].docker_container.this: Destroying... [id=cf2c3074ee4512f1eaeecec406aa8cc88a4a3758eb6c3808a9c332a9186e3ac9]
+module.sitio["docs"].docker_container.this: Destroying... [id=22f52013c97fabae75323d32710881377e33f512e0a5e3aed6b1629e797243d0]
+[...]
+Apply complete! Resources: 0 added, 0 changed, 6 destroyed.
+[exit 0]
+
+$ terraform state list   (workspace staging, debe quedar vacío)
+[exit 0]
+
+$ docker ps --filter name=g5
+NAMES            IMAGE                STATUS          PORTS
+docs-g5-prod     65645c7bb6a0         Up 29 minutes   0.0.0.0:8303->80/tcp
+tienda-g5-prod   65645c7bb6a0         Up 29 minutes   0.0.0.0:8301->80/tcp
+blog-g5-prod     65645c7bb6a0         Up 29 minutes   0.0.0.0:8302->80/tcp
+tf-state-g5      postgres:17-alpine   Up 44 minutes   127.0.0.1:5436->5432/tcp
+```
+```
+$ terraform workspace select prod
+Switched to workspace "prod".
+
+$ terraform apply fase9-prod.tfplan
+module.sitio["blog"].docker_container.this: Destroying... [id=3c9810e14c6336ed68e60b06a42f71a07c8ce6cf5344b8b7bdb7b20beea66c8f]
+module.sitio["docs"].docker_container.this: Destroying... [id=2a3693f53accf428b3884c7480852f209ff90021d4939a65fefcb08a2d3fd83c]
+module.sitio["tienda"].docker_container.this: Destroying... [id=34405751e181792342d308659edc9661bdb45a84d83d1a2d87200613898b8b97]
+[...]
+Apply complete! Resources: 0 added, 0 changed, 6 destroyed.
+[exit 0]
+
+$ terraform state list   (workspace prod, debe quedar vacío)
+[exit 0]
+
+$ terraform workspace select default
+Switched to workspace "default".
+
+$ terraform workspace list
+* default
+  dev
+  prod
+  staging
+```
+
+`docker ps` con solo el backend (antes de eliminarlo)
+```
+$ docker ps --filter name=g5
+NAMES         IMAGE                STATUS          PORTS
+tf-state-g5   postgres:17-alpine   Up 45 minutes   127.0.0.1:5436->5432/tcp
+```
+
+Eliminación del backend (solo después de los tres `destroy`) y `docker ps` final
+```
+$ docker rm -f tf-state-g5
+tf-state-g5
+
+$ docker ps -a --filter name=g5
+NAMES     IMAGE     STATUS
+```
+Ya no queda ningún contenedor del grupo: ni `web-g5`, ni los sitios, ni `clickops`, ni `prueba-g5`, ni `tf-state-g5`.
 
 **Aprobación del revisor (por cada destroy):**
+- `dev` — Aprobado (Revisor Samuel): Plan: 0 a crear, 0 a cambiar, 2 a destruir.
+- `staging` — Aprobado (Revisor Samuel): Plan: 0 a crear, 0 a cambiar, 6 a destruir.
+- `prod` — Aprobado (Revisor Samuel): Plan: 0 a crear, 0 a cambiar, 6 a destruir.
 
 ### Respuestas
 1. ¿Qué anti-patrón encontraron en el otro grupo? ¿Y cuál les señalaron a ustedes?
 
+Al grupo 2 le encontramos incumplido «Aplicar sin leer el plan», en dos puntos: un `terraform apply` sin cambios en su Fase 3 (`BITACORA.md`, líneas 357 a 365) sin aprobación anotada, y la prueba `despliegue_real` de su Fase 8, que crea y destruye un contenedor de verdad sin línea `Plan:` ni aprobación del revisor. Los otros cinco los cumplen; en secretos con una reserva, porque no tenemos su contraseña real y no pudimos buscarla literalmente. También vimos que su nota de la línea 1182 dice que buscar la contraseña de ejemplo de la guía «siempre dará vacío», pero `git log -p -S` con esa contraseña devuelve el commit `838b57d` por esa misma nota, que escribe el literal (no es una fuga). Lo que nos señalaron a nosotros no lo podemos decir: a la hora de entrega no recibimos ninguna auditoría de su grupo sobre nuestro repositorio. Lo comprobamos el 12 de noviembre de 2026: su repositorio sigue en el commit `43c4a00` (`fase-8`) sin `AUDITORIA.md`, y en el nuestro no hay issues, pull requests ni commits de otras personas.
+
 2. ¿Qué habría pasado si eliminaban el contenedor del backend antes de ejecutar los `destroy`?
 
+Terraform no habría podido leer ni escribir el state de ningún ambiente, porque los cuatro states viven dentro de ese Postgres y cada `workspace select`, `plan -destroy` y `apply` empieza por conectarse al backend. Lo vimos en pequeño: cuando `PG_CONN_STR` quedó mal escrita, los seis comandos fallaron con `net/url: invalid userinfo` antes de tocar nada, ni siquiera se pudo seleccionar el workspace. Sin backend no se habría podido destruir nada con Terraform y los siete sitios y sus imágenes habrían quedado huérfanos en Docker, sin registro de que los creó Terraform, y habría que borrarlos a mano. Por eso eliminamos `tf-state-g5` al final, después de los tres `destroy` y de comprobar con `docker ps` que no quedaba nada más del grupo (Díaz Bautista, s. f.; HashiCorp, s. f.-e).
+
 3. ¿Por qué `destroy` exige la misma disciplina de lectura que `apply`?
+
+Porque `destroy` también se aplica sin vuelta atrás: borra infraestructura real, y ejecutarlo en el workspace equivocado habría borrado, por ejemplo, `prod`. Por eso antes de cada uno se leyó el plan: `dev` con `Plan: 0 to add, 0 to change, 2 to destroy` y `staging` y `prod` con 6 a destruir cada uno, con los nombres y puertos de los sitios, y se confirmó con `workspace select` el ambiente correcto. Además aplicamos el plan guardado (`terraform apply fase9-<ambiente>.tfplan`), de modo que se destruyó exactamente lo aprobado y nada más. La regla de no aplicar sin leer el plan incluye lo que se va a destruir (Díaz Bautista, s. f.).
+
+---
+
+## Referencias
+
+Díaz Bautista, R. D. (s. f.). *Infraestructura como código: Fundamentos, módulos, testing y operación en producción* [Diapositivas del Tema VII]. Arquitectura de Software II, Corporación Universitaria Empresarial Alexander von Humboldt.
+
+HashiCorp. (s. f.-a). *Purpose of Terraform state*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/state/purpose
+
+HashiCorp. (s. f.-b). *Dependency lock file*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/files/dependency-lock
+
+HashiCorp. (s. f.-c). *Manage sensitive data in your configuration*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/manage-sensitive-data
+
+HashiCorp. (s. f.-d). *Use input variables to add module arguments*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/values/variables
+
+HashiCorp. (s. f.-e). *Backend type: pg*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/backend/pg
+
+HashiCorp. (s. f.-f). *Write Terraform tests*. Terraform Language Documentation. https://developer.hashicorp.com/terraform/language/tests
 
 ---
 
