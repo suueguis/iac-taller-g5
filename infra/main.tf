@@ -1,6 +1,9 @@
 terraform {
   required_version = ">= 1.6"
 
+  # El backend queda vacío: la conexión llega por la variable de entorno PG_CONN_STR
+  backend "pg" {}
+
   required_providers {
     docker = {
       source  = "kreuzwerker/docker"
@@ -11,27 +14,12 @@ terraform {
 
 provider "docker" {}
 
-module "tienda" {
-  source  = "./modules/sitio_web"
-  nombre  = "tienda-g${var.grupo}"
-  puerto  = 8081
-  mensaje = "Tienda del grupo ${var.grupo}"
-  imagen  = var.imagen
-}
+module "sitio" {
+  for_each = local.sitios
+  source   = "./modules/sitio_web"
 
-# TODO 1 resuelto
-module "blog" {
-  source  = "./modules/sitio_web"
-  nombre  = "blog-g${var.grupo}"
-  puerto  = 8082
-  mensaje = "Blog del grupo ${var.grupo}"
-  imagen  = var.imagen
-}
-
-module "docs" {
-  source  = "./modules/sitio_web"
-  nombre  = "docs-g${var.grupo}"
-  puerto  = 8083
-  mensaje = "Documentación del grupo ${var.grupo}"
-  imagen  = var.imagen
+  nombre  = "${each.key}-g${var.grupo}-${local.entorno}"
+  puerto  = each.value
+  mensaje = "${title(each.key)} - ${upper(local.entorno)} - grupo ${var.grupo}"
+  imagen  = local.amb.imagen # TODO 2 resuelto: la imagen sale del ambiente
 }

@@ -1198,10 +1198,233 @@ currently depending on hashicorp/docker, run the following command:
 
 ## Fase 7 · State remoto y varios ambientes
 
-### Evidencias
-_Pegar: `terraform init -migrate-state`, `terraform state list`, la consulta a la tabla `states` (antes y después de crear los ambientes), el error de bloqueo de la terminal 2, `terraform workspace list`, y `git grep` de la contraseña (sin resultados). Recuerden: la contraseña va como `<CLAVE>`._
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
 
-**Aprobación del revisor (por workspace):** _(workspace activo y cuántos sitios se crean)_
+### Evidencias
+> Sobre la contraseña: no está en ningún archivo del repositorio. En los comandos de abajo se escribe `<CLAVE>`. En esta ejecución la clave se generó al azar dentro del propio comando `docker run` y solo existe dentro del contenedor `tf-state-g5`; los scripts de apoyo (fuera del repo) la leían del contenedor y reemplazaban cualquier aparición por `<CLAVE>` en la salida. Los comandos equivalentes, tal como se escribirían a mano, son los dos primeros bloques.
+>
+> Las salidas largas de `plan` se recortaron con `[...]` o se filtraron a las líneas relevantes; se indica en cada caso. En la línea `Who:` del error de bloqueo se reemplazó el nombre del usuario y del equipo de Windows por `<USUARIO>@<EQUIPO>`.
+
+Backend: contenedor de Postgres (puerto 5436 porque otros puertos del equipo estaban ocupados)
+```
+$ docker run -d --name tf-state-g5 -p 127.0.0.1:5436:5432 -e POSTGRES_PASSWORD=<CLAVE> -e POSTGRES_DB=terraform_state postgres:17-alpine
+$ export PG_CONN_STR='postgres://postgres:<CLAVE>@localhost:5436/terraform_state?sslmode=disable'
+```
+
+Paso 1 del LEEME: solo se agregó `backend "pg" {}` al `main.tf` de la Fase 6
+```diff
+ terraform {
+   required_version = ">= 1.6"
+
++  # El backend queda vacío: la conexión llega por la variable de entorno PG_CONN_STR
++  backend "pg" {}
++
+   required_providers {
+```
+
+`terraform init -migrate-state` (con `-force-copy` para evitar la pregunta interactiva), `terraform workspace list`, `terraform state list` y `terraform plan`
+```
+$ terraform init -migrate-state -force-copy
+Initializing the backend...
+
+Successfully configured the backend "pg"! Terraform will automatically
+use this backend unless the backend configuration changes.
+
+Initializing modules...
+
+Initializing provider plugins...
+- Reusing version 4.7.0 of kreuzwerker/docker from the dependency lock file
+- Using previously-installed kreuzwerker/docker v4.7.0
+
+Terraform has been successfully initialized!
+[...]
+[exit 0]
+
+$ terraform workspace list
+* default
+
+$ terraform state list
+data.docker_network.bridge
+module.blog.docker_container.this
+module.blog.docker_image.this
+module.docs.docker_container.this
+module.docs.docker_image.this
+module.tienda.docker_container.this
+module.tienda.docker_image.this
+
+$ terraform plan
+[...]
+No changes. Your infrastructure matches the configuration.
+```
+
+Tabla `states` antes de crear los ambientes
+```
+$ docker exec tf-state-g5 psql -U postgres -d terraform_state -c "SELECT id, name FROM terraform_remote_state.states;"
+ id |  name   
+----+---------
+  1 | default
+(1 row)
+```
+
+Prueba de bloqueo con dos procesos (equivalen a las dos terminales). Terminal 1: `terraform apply -var="imagen=nginx:1.27-alpine"`, que se queda esperando la confirmación (el plan era 6 a crear, 0 a cambiar, 6 a destruir) y nunca recibe `yes`; al cerrarse su entrada se cancela solo. Terminal 2, ocho segundos después: `terraform plan`
+```
+--- Terminal 2: terraform plan
+$ terraform plan
+
+Error: Error acquiring the state lock
+
+Error message: Workspace is already locked: default
+Lock Info:
+  ID:        659a9207-ec1a-d25f-d1d5-d093315b71b1
+  Path:      
+  Operation: OperationTypePlan
+  Who:       <USUARIO>@<EQUIPO>
+  Version:   1.17.0
+  Created:   2026-11-12 05:46:43.9593393 +0000 UTC
+  Info:      
+
+
+Terraform acquires a state lock to protect the state from being written
+by multiple users at the same time. Please resolve the issue above and try
+again. For most commands, you can disable locking with the "-lock=false"
+flag, but this is not recommended.
+[exit 1]
+
+--- Terminal 1 terminó. Salida de su apply (últimas líneas):
+
+Do you want to perform these actions?
+  Terraform will perform the actions described above.
+  Only 'yes' will be accepted to approve.
+
+  Enter a value: 
+Error: error asking for approval: EOF
+
+--- Comprobación: nada cambió
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+(Un primer intento de la prueba usó `terraform console` para mantener el lock y no sirvió: ese comando no toma el lock y el `plan` paralelo pasó sin error. Por eso se rehízo con un `apply` en espera.)
+
+Paso 4 del LEEME: `terraform destroy` en el workspace `default`, con los archivos de la Fase 6 más `backend "pg" {}`
+```
+$ terraform workspace show
+default
+
+$ terraform plan -destroy -out=fase7-default-destroy.tfplan
+[...]
+  # module.blog.docker_container.this will be destroyed
+  # module.blog.docker_image.this will be destroyed
+  # module.docs.docker_container.this will be destroyed
+  # module.docs.docker_image.this will be destroyed
+  # module.tienda.docker_container.this will be destroyed
+  # module.tienda.docker_image.this will be destroyed
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+
+Changes to Outputs:
+  - red_driver = "bridge" -> null
+  - urls       = [
+      - "http://localhost:8081",
+      - "http://localhost:8082",
+      - "http://localhost:8083",
+    ] -> null
+
+$ terraform apply fase7-default-destroy.tfplan
+module.docs.docker_container.this: Destroying... [id=8ad61cba5c69cabd1cdbf1c7ab7bd0ed313aa02091cf1a1a3bc9c17758432d0b]
+module.blog.docker_container.this: Destroying... [id=6c4f4c3d6443b018e84812c27af78430aa1190890f7ab67a983a57eec46496c8]
+module.tienda.docker_container.this: Destroying... [id=5b63fe5288bb6397431fd0aad792f64391416d341fca35fd74da25224ad8f3ca]
+[...]
+Apply complete! Resources: 0 added, 0 changed, 6 destroyed.
+[exit 0]
+
+$ terraform state list   (default, ya vacío)
+[exit 0]
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE                COMMAND                  CREATED          STATUS          PORTS                      NAMES
+09e2919cb683   postgres:17-alpine   "docker-entrypoint.s…"   12 minutes ago   Up 12 minutes   127.0.0.1:5436->5432/tcp   tf-state-g5
+```
+
+Paso 5: recién después del destroy se copiaron los archivos de `material-por-fase/fase-7/infra/` (cambian `main.tf`, `locals.tf` y `outputs.tf`). `terraform init` y `terraform fmt -check -recursive` pasaron. En el workspace `default`, `terraform validate` y `terraform plan` fallan con el error esperado:
+```
+$ terraform workspace show
+default
+$ terraform plan   (workspace default: debe fallar)
+
+Error: Invalid index
+
+  on locals.tf line 12, in locals:
+  12:   amb = local.ambientes[local.entorno]
+    ├────────────────
+    │ local.ambientes is object with 3 attributes
+    │ local.entorno is "default"
+
+The given key does not identify an element in this collection value.
+[exit 1]
+```
+
+Ambientes. Cada uno se creó con `terraform workspace new <ambiente>` y se aplicó con su plan guardado (salidas filtradas a las líneas relevantes):
+```
+dev      Plan: 2 to add, 0 to change, 0 to destroy.   (tienda-g5-dev, 8101, nginx:1.28-alpine)
+staging  Plan: 6 to add, 0 to change, 0 to destroy.   (tienda 8201, blog 8202, docs 8203, nginx:1.28-alpine)
+prod     Plan: 6 to add, 0 to change, 0 to destroy.   (tienda 8301, blog 8302, docs 8303, nginx:1.27-alpine)
+```
+```
+$ terraform apply fase7-dev.tfplan        -> Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+$ terraform apply fase7-staging.tfplan    -> Apply complete! Resources: 6 added, 0 changed, 0 destroyed.
+$ terraform apply fase7-prod.tfplan       -> Apply complete! Resources: 6 added, 0 changed, 0 destroyed.
+```
+Tras cada `apply`, `terraform plan` dio `No changes`. Respuesta HTTP de los sitios, por ejemplo:
+```
+$ curl -s http://localhost:8302
+<h1>Blog - PROD - grupo 5</h1>
+<p>Sitio blog-g5-prod, desplegado con Terraform</p>
+```
+
+`terraform workspace list`, tabla `states` después de crear los ambientes y `docker ps`
+```
+$ terraform workspace list
+  default
+  dev
+* prod
+  staging
+
+$ docker exec tf-state-g5 psql -U postgres -d terraform_state -c "SELECT id, name FROM terraform_remote_state.states ORDER BY id;"
+ id |  name   
+----+---------
+  1 | default
+  3 | dev
+  5 | staging
+  7 | prod
+(4 rows)
+
+$ docker ps --filter name=g5
+NAMES               IMAGE                STATUS              PORTS
+docs-g5-prod        65645c7bb6a0         Up 6 seconds        0.0.0.0:8303->80/tcp
+tienda-g5-prod      65645c7bb6a0         Up 6 seconds        0.0.0.0:8301->80/tcp
+blog-g5-prod        65645c7bb6a0         Up 6 seconds        0.0.0.0:8302->80/tcp
+tienda-g5-staging   a8b39bd9cf0f         Up 41 seconds       0.0.0.0:8201->80/tcp
+docs-g5-staging     a8b39bd9cf0f         Up 41 seconds       0.0.0.0:8203->80/tcp
+blog-g5-staging     a8b39bd9cf0f         Up 41 seconds       0.0.0.0:8202->80/tcp
+tienda-g5-dev       a8b39bd9cf0f         Up About a minute   0.0.0.0:8101->80/tcp
+tf-state-g5         postgres:17-alpine   Up 14 minutes       127.0.0.1:5436->5432/tcp
+```
+Son siete sitios más el backend.
+
+Comprobación de que la contraseña no está en el repositorio (con la clave real, que aquí se muestra como `<CLAVE>`):
+```
+$ git grep <CLAVE>
+(sin resultados)
+$ git log --all -p -S<CLAVE>
+(sin resultados)
+```
+
+**Aprobación del revisor (por workspace):**
+- default (destroy, con los archivos de la Fase 6 y `backend "pg" {}`) — Aprobado (Revisor Samuel): workspace default, Plan: 0 a crear, 0 a cambiar, 6 a destruir.
+- Prueba de bloqueo (apply en espera, que se cancela solo) — Aprobado (Revisor Samuel): workspace default, Plan: 6 a crear, 0 a cambiar, 6 a destruir (no se ejecutó: nunca recibió `yes`).
+- dev — Aprobado (Revisor Samuel): workspace dev, Plan: 2 a crear, 0 a cambiar, 0 a destruir (1 sitio).
+- staging — Aprobado (Revisor Samuel): workspace staging, Plan: 6 a crear, 0 a cambiar, 0 a destruir (3 sitios).
+- prod — Aprobado (Revisor Samuel): workspace prod, Plan: 6 a crear, 0 a cambiar, 0 a destruir (3 sitios, imagen 1.27).
 
 ### Respuestas
 1. ¿Qué respondió la terminal 2 en la prueba de bloqueo? ¿Qué problema de trabajo en equipo evita?

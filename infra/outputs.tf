@@ -3,12 +3,8 @@ output "red_driver" {
   value       = data.docker_network.bridge.driver
 }
 
-# TODO 2 resuelto
+# TODO 3 resuelto: mapa nombre => url recorriendo module.sitio
 output "urls" {
-  description = "URL de los tres sitios"
-  value = [
-    module.tienda.url,
-    module.blog.url,
-    module.docs.url,
-  ]
+  description = "URL de cada sitio del ambiente activo"
+  value       = { for k, m in module.sitio : m.nombre => m.url }
 }
