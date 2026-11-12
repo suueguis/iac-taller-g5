@@ -1443,8 +1443,195 @@ $ git log --all -p -S<CLAVE>
 
 ## Fase 8 · Testing y calidad
 
+**Roles:** Operador: Samuel · Navegante: Susana · Revisora: Susana · Bitácora: Susana
+
 ### Evidencias
-_Pegar: `terraform fmt -check` y `validate`, `terraform test` (cuatro pruebas aprobadas), los dos escaneos de Checkov o Trivy (antes y después de corregir el bucket), y `bash validar.sh` completo. Anotar también qué se vio en `docker ps` durante `despliegue_real`._
+Se copió `material-por-fase/fase-8/` al repositorio: `validar.sh` y `seguridad/` en la raíz y `sitio_web.tftest.hcl` en `infra/modules/sitio_web/tests/`. Para que `terraform test` funcione en el módulo hubo que correr `terraform init` dentro de `infra/modules/sitio_web` (crea su propio `.terraform.lock.hcl`, que sí se sube).
+
+Nota: `terraform validate` se ejecutó con el workspace `prod` activo; en el workspace `default` falla con `Invalid index` (Fase 7).
+
+`terraform fmt -check -recursive` y `terraform validate`
+```
+$ terraform -chdir=infra fmt -check -recursive
+(sin salida; código de salida 0)
+
+$ terraform -chdir=infra validate
+Success! The configuration is valid.
+```
+
+`terraform test` (cuatro pruebas)
+```
+$ terraform -chdir=infra/modules/sitio_web test
+tests\sitio_web.tftest.hcl... in progress
+  run "url_coherente_con_puerto"... pass
+  run "rechaza_puerto_fuera_de_rango"... pass
+  run "nombre_coincide_con_variable"... pass
+  run "despliegue_real"... pass
+tests\sitio_web.tftest.hcl... tearing down
+tests\sitio_web.tftest.hcl... pass
+
+Success! 4 passed, 0 failed.
+```
+
+`docker ps` durante `despliegue_real` (observado en un bucle cada 0,5 s mientras corría la prueba)
+```
+00:58:49
+prueba-g5	a8b39bd9cf0f	Up Less than a second	0.0.0.0:8999->80/tcp
+
+$ docker ps --filter name=prueba-g5     (después de la prueba)
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+```
+El contenedor `prueba-g5` apareció en el puerto 8999 durante `despliegue_real` y desapareció al terminar la prueba. El observador lo vio en 1 de 4 instantes (la prueba dura muy poco). Con `validar.sh` se vio igual, en 1 de 12 instantes (`Up 1 second`, puerto 8999).
+
+Escaneo de seguridad con Checkov (versión 3.4.4). Checkov no estaba instalado, y tampoco `pipx` ni `trivy`; se instaló con `pip` en un entorno virtual aislado. Se ejecutó con `BC_SKIP_MAPPING=TRUE` para que no intente consultar una API externa (sin eso imprime un aviso largo y sigue funcionando). `bucket.tf` no se aplica, solo se escanea.
+
+ANTES de corregir (los cuatro valores de `aws_s3_bucket_public_access_block` en `false`), con los cuatro controles de la política del equipo:
+```
+$ checkov -d seguridad --check CKV_AWS_53,CKV_AWS_54,CKV_AWS_55,CKV_AWS_56
+
+terraform scan results:
+
+Passed checks: 0, Failed checks: 4, Skipped checks: 0
+
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_buckets' enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+```
+
+ANTES, escaneo completo (todos los controles de Checkov; salida filtrada a las líneas `Check:` y `FAILED`/`PASSED`):
+```
+$ checkov -d seguridad --compact
+Passed checks: 4, Failed checks: 11, Skipped checks: 0
+Check: CKV_AWS_93  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_19  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_20  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_57  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_53  FAILED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_54  FAILED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_55  FAILED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_56  FAILED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV2_AWS_62 FAILED  aws_s3_bucket.evidencias   (notificaciones de eventos)
+Check: CKV2_AWS_61 FAILED  aws_s3_bucket.evidencias   (ciclo de vida)
+Check: CKV_AWS_18  FAILED  aws_s3_bucket.evidencias   (registro de accesos)
+Check: CKV_AWS_144 FAILED  aws_s3_bucket.evidencias   (replicación entre regiones)
+Check: CKV_AWS_21  FAILED  aws_s3_bucket.evidencias   (versionado)
+Check: CKV_AWS_145 FAILED  aws_s3_bucket.evidencias   (cifrado con KMS)
+Check: CKV2_AWS_6  FAILED  aws_s3_bucket.evidencias   (bloqueo de acceso público)
+```
+
+Corrección en `seguridad/bucket.tf` (diff respecto al material):
+```diff
+ resource "aws_s3_bucket_public_access_block" "evidencias" {
+   bucket                  = aws_s3_bucket.evidencias.id
+-  block_public_acls       = false
+-  block_public_policy     = false
+-  ignore_public_acls      = false
+-  restrict_public_buckets = false
++  block_public_acls       = true
++  block_public_policy     = true
++  ignore_public_acls      = true
++  restrict_public_buckets = true
+ }
+```
+
+DESPUÉS de corregir, con los cuatro controles de la política del equipo:
+```
+$ checkov -d seguridad --check CKV_AWS_53,CKV_AWS_54,CKV_AWS_55,CKV_AWS_56
+Passed checks: 4, Failed checks: 0, Skipped checks: 0
+
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_buckets' enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+```
+
+DESPUÉS, escaneo completo:
+```
+$ checkov -d seguridad --compact
+Passed checks: 9, Failed checks: 6, Skipped checks: 0
+Check: CKV_AWS_93  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_53  PASSED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_54  PASSED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_55  PASSED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_56  PASSED  aws_s3_bucket_public_access_block.evidencias
+Check: CKV_AWS_19  PASSED  aws_s3_bucket.evidencias
+Check: CKV2_AWS_6  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_20  PASSED  aws_s3_bucket.evidencias
+Check: CKV_AWS_57  PASSED  aws_s3_bucket.evidencias
+Check: CKV2_AWS_62 FAILED  aws_s3_bucket.evidencias   (notificaciones de eventos)
+Check: CKV2_AWS_61 FAILED  aws_s3_bucket.evidencias   (ciclo de vida)
+Check: CKV_AWS_18  FAILED  aws_s3_bucket.evidencias   (registro de accesos)
+Check: CKV_AWS_144 FAILED  aws_s3_bucket.evidencias   (replicación entre regiones)
+Check: CKV_AWS_21  FAILED  aws_s3_bucket.evidencias   (versionado)
+Check: CKV_AWS_145 FAILED  aws_s3_bucket.evidencias   (cifrado con KMS)
+```
+(Los controles `CKV_AWS_53` a `56` pasan; además `CKV2_AWS_6` pasó de fallar a pasar.)
+
+`bash validar.sh` completo
+```
+$ bash validar.sh
+Success! The configuration is valid.
+
+tests\sitio_web.tftest.hcl... in progress
+  run "url_coherente_con_puerto"... pass
+  run "rechaza_puerto_fuera_de_rango"... pass
+  run "nombre_coincide_con_variable"... pass
+  run "despliegue_real"... pass
+tests\sitio_web.tftest.hcl... tearing down
+tests\sitio_web.tftest.hcl... pass
+
+Success! 4 passed, 0 failed.
+
+By Prisma Cloud | version: 3.4.4 
+
+terraform scan results:
+
+Passed checks: 4, Failed checks: 0, Skipped checks: 0
+
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Check: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_buckets' enabled"
+	PASSED for resource: aws_s3_bucket_public_access_block.evidencias
+	File: \bucket.tf:8-14
+Validación completa: el cambio puede pasar a revisión
+(código de salida 0)
+```
+(Se recortó el logotipo ASCII de Checkov. `fmt -check` no imprime nada cuando todo está bien.)
+
+`docker ps` al terminar la fase (solo el taller): siete sitios más el backend, sin `prueba-g5`
+```
+NAMES               IMAGE                STATUS          PORTS
+docs-g5-prod        65645c7bb6a0         Up 7 minutes    0.0.0.0:8303->80/tcp
+tienda-g5-prod      65645c7bb6a0         Up 7 minutes    0.0.0.0:8301->80/tcp
+blog-g5-prod        65645c7bb6a0         Up 7 minutes    0.0.0.0:8302->80/tcp
+tienda-g5-staging   a8b39bd9cf0f         Up 8 minutes    0.0.0.0:8201->80/tcp
+docs-g5-staging     a8b39bd9cf0f         Up 8 minutes    0.0.0.0:8203->80/tcp
+blog-g5-staging     a8b39bd9cf0f         Up 8 minutes    0.0.0.0:8202->80/tcp
+tienda-g5-dev       a8b39bd9cf0f         Up 9 minutes    0.0.0.0:8101->80/tcp
+tf-state-g5         postgres:17-alpine   Up 22 minutes   127.0.0.1:5436->5432/tcp
+```
+
+**Aprobación del revisor:** Aprobado (Revisora Susana): Plan: 2 a crear, 0 a cambiar, 0 a destruir (la prueba `despliegue_real` crea la imagen y el contenedor `prueba-g5` y `terraform test` los destruye al terminar). Se corrió dos veces: con `terraform test` y dentro de `validar.sh`.
 
 ### Respuestas
 1. ¿Qué encontró cada nivel (estático, pruebas, seguridad) que los otros no podían encontrar?
