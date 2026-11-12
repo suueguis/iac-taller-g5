@@ -846,10 +846,145 @@ No changes. Your infrastructure matches the configuration.
 
 ## Fase 5 · Las piezas que dan flexibilidad
 
-### Evidencias
-_Pegar: salida de `terraform plan` y `apply`, el resultado de `terraform console`, `terraform output`, y los dos `plan` de la validación (puerto 9500 y 8085)._
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
 
-**Aprobación del revisor:** _(incluir la explicación de por qué el contenedor se reemplaza)_
+### Evidencias
+Se copió todo `material-por-fase/fase-5/infra/` a `infra/`: reemplaza `main.tf` y agrega `variables.tf`, `locals.tf`, `data.tf`, `outputs.tf` y `terraform.tfvars` (`grupo = 5`). `terraform fmt -check` y `terraform validate` pasaron sin tocar el HCL.
+
+`terraform plan -out=fase5.tfplan`
+```
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+data.docker_network.bridge: Reading...
+data.docker_network.bridge: Read complete after 0s [id=2bd15f0293fc4780a4c3e7a76cafb9c5f5cf1b84d2a57a48ff51de06fd017fa3]
+docker_container.web: Refreshing state... [id=962d621ba780b595488336b53a97afb982520630463657d743ed7223638c097c]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # docker_container.web must be replaced
+-/+ resource "docker_container" "web" {
+      [...]
+        name                                        = "web-g5"
+      [...]
+      ~ healthcheck (known after apply)
+
+      + labels { # forces replacement
+          + label = "curso"
+          + value = "arquitectura-sw-2"
+        }
+      + labels { # forces replacement
+          + label = "grupo"
+          + value = "5"
+        }
+
+      + upload { # forces replacement
+          + content        = <<-EOT
+                <h1>Hola desde el grupo 5</h1>
+                <p>Desplegado con Terraform por el grupo 5</p>
+            EOT
+          + executable     = false
+          + file           = "/usr/share/nginx/html/index.html"
+            # (6 unchanged attributes hidden)
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+Plan: 1 to add, 0 to change, 1 to destroy.
+
+Changes to Outputs:
+  + contenedor = "web-g5"
+  + red_driver = "bridge"
+```
+(Se recortaron con `[...]` las líneas de atributos calculados del contenedor, como en la Fase 4.)
+
+`terraform apply "fase5.tfplan"`, comprobaciones y salidas
+```
+$ terraform apply fase5.tfplan
+docker_container.web: Destroying... [id=962d621ba780b595488336b53a97afb982520630463657d743ed7223638c097c]
+docker_container.web: Destruction complete after 1s
+docker_container.web: Creating...
+docker_container.web: Creation complete after 1s [id=0d30e8177c96923becacc08156da287fa3464b2dc6370d2758bbbb0bedeaf58a]
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+
+Outputs:
+
+contenedor = "web-g5"
+red_driver = "bridge"
+url = "http://localhost:8080"
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS                  PORTS                  NAMES
+0d30e8177c96   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up Less than a second   0.0.0.0:8080->80/tcp   web-g5
+
+$ curl -s http://localhost:8080
+<h1>Hola desde el grupo 5</h1>
+<p>Desplegado con Terraform por el grupo 5</p>
+
+$ docker inspect web-g5 --format "{{json .Config.Labels}}"
+{"curso":"arquitectura-sw-2","grupo":"5","maintainer":"NGINX Docker Maintainers <docker-maint@nginx.com>"}
+
+$ terraform output
+contenedor = "web-g5"
+red_driver = "bridge"
+url = "http://localhost:8080"
+
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+
+`terraform console` (una expresión por vez)
+```
+> local.nombre
+"web-g5"
+> local.etiquetas
+{
+  "curso" = "arquitectura-sw-2"
+  "grupo" = "5"
+}
+> var.puerto
+8080
+> var.imagen
+"nginx:1.28-alpine"
+> data.docker_network.bridge.driver
+"bridge"
+```
+
+Validación del puerto: `terraform plan -var="puerto=9500"` (falla)
+```
+data.docker_network.bridge: Reading...
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+data.docker_network.bridge: Read complete after 0s [id=2bd15f0293fc4780a4c3e7a76cafb9c5f5cf1b84d2a57a48ff51de06fd017fa3]
+
+Planning failed. Terraform encountered an error while generating this plan.
+
+
+Error: Invalid value for variable
+
+  on variables.tf line 6:
+   6: variable "puerto" {
+    ├────────────────
+    │ var.puerto is 9500
+
+El puerto debe estar entre 8000 y 8999.
+
+This was checked by the validation rule at variables.tf:11,3-13.
+(código de salida: 1)
+```
+
+Validación del puerto: `terraform plan -var="puerto=8085"` (solo `plan`, no se aplicó; salida filtrada con `grep` a las líneas relevantes)
+```
+          ~ external = 8080 -> 8085 # forces replacement
+Plan: 1 to add, 0 to change, 1 to destroy.
+Changes to Outputs:
+  ~ url        = "http://localhost:8080" -> "http://localhost:8085"
+```
+
+**Aprobación del revisor:** Aprobado (Revisor Samuel): Plan: 1 a crear, 0 a cambiar, 1 a destruir. El contenedor se reemplaza (no se modifica) porque los bloques nuevos `labels` y `upload` figuran como `forces replacement`: el provider no puede cambiar esos atributos en un contenedor ya creado, así que lo destruye y crea otro con el mismo nombre y puerto.
 
 ### Respuestas
 1. `puerto` tiene un default, puede venir de `terraform.tfvars` y se pasó con `-var`. ¿Qué valor gana cuando hay varios?

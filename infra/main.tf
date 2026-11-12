@@ -12,20 +12,31 @@ terraform {
 provider "docker" {}
 
 resource "docker_image" "nginx" {
-  name         = "nginx:1.28-alpine"
+  name         = var.imagen
   keep_locally = true
 }
 
 resource "docker_container" "web" {
-  name  = "web-g5"
+  name  = local.nombre
   image = docker_image.nginx.image_id
 
   ports {
     internal = 80
-    external = 8080
+    external = var.puerto
   }
-}
 
-output "url" {
-  value = "http://localhost:8080"
+  upload {
+    content = local.html
+    file    = "/usr/share/nginx/html/index.html"
+  }
+
+  # TODO 3 resuelto: una etiqueta por cada elemento de local.etiquetas
+  dynamic "labels" {
+    for_each = local.etiquetas
+
+    content {
+      label = labels.key
+      value = labels.value
+    }
+  }
 }
