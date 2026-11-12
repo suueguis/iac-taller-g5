@@ -328,10 +328,264 @@ nothing added to commit but untracked files present (use "git add" to track)
 
 ## Fase 3 · Idempotencia y estado
 
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
+
 ### Evidencias
-_Pegar: `terraform apply` sin cambios, `terraform state list`, `terraform state show docker_container.web`, el valor de `serial` antes y después, el plan con `-/+` y `forces replacement`, y el plan final sin cambios._
+`terraform plan` (sin cambios) y `terraform apply` sin cambios
+```
+$ terraform plan
+docker_image.nginx: Refreshing state... [id=sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine]
+docker_container.web: Refreshing state... [id=162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+
+$ terraform apply
+docker_image.nginx: Refreshing state... [id=sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine]
+docker_container.web: Refreshing state... [id=162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+```
+
+`terraform state list` y `terraform state show docker_container.web`
+```
+$ terraform state list
+docker_container.web
+docker_image.nginx
+
+$ terraform state show docker_container.web
+# docker_container.web:
+resource "docker_container" "web" {
+    attach                                      = false
+    bridge                                      = null
+    command                                     = [
+        "nginx",
+        "-g",
+        "daemon off;",
+    ]
+    container_read_refresh_timeout_milliseconds = 15000
+    cpu_set                                     = null
+    cpu_shares                                  = 0
+    domainname                                  = null
+    entrypoint                                  = [
+        "/docker-entrypoint.sh",
+    ]
+    env                                         = []
+    hostname                                    = "162bfac4bf4c"
+    id                                          = "162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6"
+    image                                       = "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
+    init                                        = false
+    ipc_mode                                    = "private"
+    log_driver                                  = "json-file"
+    logs                                        = false
+    max_retry_count                             = 0
+    memory                                      = 0
+    memory_reservation                          = 0
+    memory_swap                                 = 0
+    must_run                                    = true
+    name                                        = "web-g5"
+    network_data                                = [
+        {
+            gateway                   = "172.17.0.1"
+            global_ipv6_address       = null
+            global_ipv6_prefix_length = 0
+            ip_address                = "172.17.0.3"
+            ip_prefix_length          = 16
+            ipv6_gateway              = null
+            mac_address               = "c6:59:1c:b3:a5:31"
+            network_name              = "bridge"
+        },
+    ]
+    network_mode                                = "bridge"
+    platform                                    = "linux"
+    privileged                                  = false
+    publish_all_ports                           = false
+    read_only                                   = false
+    remove_volumes                              = true
+    restart                                     = "no"
+    rm                                          = false
+    runtime                                     = "runc"
+    security_opts                               = []
+    shm_size                                    = 64
+    start                                       = true
+    stdin_open                                  = false
+    stop_signal                                 = "SIGQUIT"
+    stop_timeout                                = 1
+    tty                                         = false
+    user                                        = null
+    userns_mode                                 = null
+    wait                                        = false
+    wait_timeout                                = 60
+    working_dir                                 = "/"
+
+    ports {
+        external = 8080
+        internal = 80
+        ip       = "0.0.0.0"
+        protocol = "tcp"
+    }
+}
+```
+
+Valor de `serial` (en `terraform.tfstate`)
+```
+Antes de cualquier apply de esta fase (tras la Fase 2):  "serial": 3
+Después del apply sin cambios:                           "serial": 4
+Después del apply con el cambio de imagen:               "serial": 9
+```
+
+Cambio hecho a mano en `infra/main.tf`
+```diff
+ resource "docker_image" "nginx" {
+-  name         = "nginx:1.27-alpine"
++  name         = "nginx:1.28-alpine"
+   keep_locally = true
+ }
+```
+
+`terraform plan -out=fase3.tfplan` (con `-/+` y `forces replacement`)
+```
+docker_image.nginx: Refreshing state... [id=sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine]
+docker_container.web: Refreshing state... [id=162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # docker_container.web must be replaced
+-/+ resource "docker_container" "web" {
+      + bridge                                      = (known after apply)
+      ~ command                                     = [
+          - "nginx",
+          - "-g",
+          - "daemon off;",
+        ] -> (known after apply)
+      + container_logs                              = (known after apply)
+      - cpu_shares                                  = 0 -> null
+      - device_cgroup_rules                         = [] -> null
+      - dns                                         = [] -> null
+      - dns_opts                                    = [] -> null
+      - dns_search                                  = [] -> null
+      ~ entrypoint                                  = [
+          - "/docker-entrypoint.sh",
+        ] -> (known after apply)
+      ~ env                                         = [] -> (known after apply)
+      + exit_code                                   = (known after apply)
+      - group_add                                   = [] -> null
+      ~ hostname                                    = "162bfac4bf4c" -> (known after apply)
+      ~ id                                          = "162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6" -> (known after apply)
+      ~ image                                       = "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10" -> (known after apply) # forces replacement
+      ~ init                                        = false -> (known after apply)
+      ~ ipc_mode                                    = "private" -> (known after apply)
+      ~ log_driver                                  = "json-file" -> (known after apply)
+      - log_opts                                    = {} -> null
+      - max_retry_count                             = 0 -> null
+      - memory                                      = 0 -> null
+      - memory_swap                                 = 0 -> null
+        name                                        = "web-g5"
+      ~ network_data                                = [
+          - {
+              - gateway                   = "172.17.0.1"
+              - global_ipv6_prefix_length = 0
+              - ip_address                = "172.17.0.3"
+              - ip_prefix_length          = 16
+              - mac_address               = "c6:59:1c:b3:a5:31"
+              - network_name              = "bridge"
+                # (2 unchanged attributes hidden)
+            },
+        ] -> (known after apply)
+      ~ platform                                    = "linux" -> (known after apply)
+      - privileged                                  = false -> null
+      - publish_all_ports                           = false -> null
+      ~ runtime                                     = "runc" -> (known after apply)
+      ~ security_opts                               = [] -> (known after apply)
+      ~ shm_size                                    = 64 -> (known after apply)
+      ~ stop_signal                                 = "SIGQUIT" -> (known after apply)
+      ~ stop_timeout                                = 1 -> (known after apply)
+      - storage_opts                                = {} -> null
+      - sysctls                                     = {} -> null
+      - tmpfs                                       = {} -> null
+      - working_dir                                 = "/" -> null
+        # (19 unchanged attributes hidden)
+
+      ~ healthcheck (known after apply)
+
+      ~ labels (known after apply)
+
+        # (1 unchanged block hidden)
+    }
+
+  # docker_image.nginx must be replaced
+-/+ resource "docker_image" "nginx" {
+      ~ id           = "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine" -> (known after apply)
+      ~ image_id     = "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10" -> (known after apply)
+      ~ name         = "nginx:1.27-alpine" -> "nginx:1.28-alpine" # forces replacement
+      ~ repo_digest  = "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10" -> (known after apply)
+        # (1 unchanged attribute hidden)
+    }
+
+Plan: 2 to add, 0 to change, 2 to destroy.
+
+─────────────────────────────────────────────────────────────────────────────
+
+Saved the plan to: fase3.tfplan
+
+To perform exactly these actions, run the following command to apply:
+    terraform apply "fase3.tfplan"
+```
+
+`terraform apply "fase3.tfplan"`, plan final y comprobación
+```
+$ terraform apply fase3.tfplan
+docker_container.web: Destroying... [id=162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6]
+docker_container.web: Destruction complete after 1s
+docker_image.nginx: Destroying... [id=sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine]
+docker_image.nginx: Destruction complete after 0s
+docker_image.nginx: Creating...
+docker_image.nginx: Creation complete after 1s [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_container.web: Creating...
+docker_container.web: Creation complete after 1s [id=5c761c1e3fbb2dba0bc75dbe0fdff476f49b698539dc3ab0501aa5e366a8599e]
+
+Apply complete! Resources: 2 added, 0 changed, 2 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+
+$ terraform plan
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_container.web: Refreshing state... [id=5c761c1e3fbb2dba0bc75dbe0fdff476f49b698539dc3ab0501aa5e366a8599e]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                  NAMES
+5c761c1e3fbb   a8b39bd9cf0f   "/docker-entrypoint.…"   3 seconds ago   Up 2 seconds   0.0.0.0:8080->80/tcp   web-g5
+
+$ curl -sI http://localhost:8080 | head -2
+HTTP/1.1 200 OK
+Server: nginx/1.28.3
+```
 
 **Aprobación del revisor:**
+- Apply sin cambios — Aprobado (Revisor Samuel): 0 a crear, 0 a cambiar, 0 a destruir.
+- Cambio de imagen a 1.28 — Aprobado (Revisor Samuel): Plan: 2 a crear, 0 a cambiar, 2 a destruir.
 
 ### Respuestas
 1. ¿Qué respondió Terraform en el paso 1 y en qué se diferencia del segundo `docker run` de la Fase 1?
