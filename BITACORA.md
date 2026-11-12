@@ -154,10 +154,164 @@ CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
 
 ## Fase 2 · Primer despliegue: write → init → plan → apply
 
-### Evidencias
-_Pegar: salida de `terraform init`, `terraform plan` (con la línea `Plan:`), `terraform apply`, `terraform output`, `docker ps` y `git status`._
+**Roles:** Operador: Samuel · Navegante: Susana · Revisora: Susana · Bitácora: Susana
 
-**Aprobación del revisor:** _(ej. «Aprobado: 2 a crear, 0 a cambiar, 0 a destruir»)_
+### Evidencias
+`infra/main.tf` copiado de `material-por-fase/fase-2/infra/main.tf` sin cambios. `terraform fmt -check` y `terraform validate` pasaron sin errores.
+
+`terraform init`
+```
+Initializing the backend...
+
+Initializing provider plugins...
+- Finding kreuzwerker/docker versions matching "~> 4.6"...
+- Installing kreuzwerker/docker v4.7.0...
+- Installed kreuzwerker/docker v4.7.0 (self-signed, key ID 0DCE698927DAF8EC)
+Partner and community providers are signed by their developers.
+If you'd like to know more about provider signing, you can read about it here:
+https://developer.hashicorp.com/terraform/cli/plugins/signing
+
+Terraform has created a lock file .terraform.lock.hcl to record the provider
+selections it made above. Include this file in your version control repository
+so that Terraform can guarantee to make the same selections by default when
+you run "terraform init" in the future.
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+```
+
+`terraform plan -out=fase2.tfplan`
+```
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # docker_container.web will be created
+  + resource "docker_container" "web" {
+      + attach                                      = false
+      + bridge                                      = (known after apply)
+      + command                                     = (known after apply)
+      + container_logs                              = (known after apply)
+      + container_read_refresh_timeout_milliseconds = 15000
+      + entrypoint                                  = (known after apply)
+      + env                                         = (known after apply)
+      + exit_code                                   = (known after apply)
+      + hostname                                    = (known after apply)
+      + id                                          = (known after apply)
+      + image                                       = (known after apply)
+      + init                                        = (known after apply)
+      + ipc_mode                                    = (known after apply)
+      + log_driver                                  = (known after apply)
+      + logs                                        = false
+      + memory_reservation                          = 0
+      + must_run                                    = true
+      + name                                        = "web-g5"
+      + network_data                                = (known after apply)
+      + network_mode                                = "bridge"
+      + platform                                    = (known after apply)
+      + read_only                                   = false
+      + remove_volumes                              = true
+      + restart                                     = "no"
+      + rm                                          = false
+      + runtime                                     = (known after apply)
+      + security_opts                               = (known after apply)
+      + shm_size                                    = (known after apply)
+      + start                                       = true
+      + stdin_open                                  = false
+      + stop_signal                                 = (known after apply)
+      + stop_timeout                                = (known after apply)
+      + tty                                         = false
+      + wait                                        = false
+      + wait_timeout                                = 60
+
+      + healthcheck (known after apply)
+
+      + labels (known after apply)
+
+      + ports {
+          + external = 8080
+          + internal = 80
+          + ip       = "0.0.0.0"
+          + protocol = "tcp"
+        }
+    }
+
+  # docker_image.nginx will be created
+  + resource "docker_image" "nginx" {
+      + id           = (known after apply)
+      + image_id     = (known after apply)
+      + keep_locally = true
+      + name         = "nginx:1.27-alpine"
+      + repo_digest  = (known after apply)
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + url = "http://localhost:8080"
+
+─────────────────────────────────────────────────────────────────────────────
+
+Saved the plan to: fase2.tfplan
+
+To perform exactly these actions, run the following command to apply:
+    terraform apply "fase2.tfplan"
+```
+
+`terraform apply "fase2.tfplan"`
+```
+docker_image.nginx: Creating...
+docker_image.nginx: Creation complete after 1s [id=sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10nginx:1.27-alpine]
+docker_container.web: Creating...
+docker_container.web: Creation complete after 2s [id=162bfac4bf4cd1b076ca8423e79f2069f149e5b10131e658718600246840e3a6]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+```
+
+`terraform output`
+```
+url = "http://localhost:8080"
+```
+
+`docker ps --filter name=g5` (recortado a los contenedores del taller)
+```
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS        PORTS                  NAMES
+162bfac4bf4c   65645c7bb6a0   "/docker-entrypoint.…"   2 seconds ago   Up 1 second   0.0.0.0:8080->80/tcp   web-g5
+```
+
+`curl -sI http://localhost:8080 | head -2`
+```
+HTTP/1.1 200 OK
+Server: nginx/1.27.5
+```
+
+`git status` (antes del commit; `.terraform/` y `fase2.tfplan` no aparecen porque `.gitignore` los excluye, y `.terraform.lock.hcl` sí se sube)
+```
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	infra/.terraform.lock.hcl
+	infra/main.tf
+
+nothing added to commit but untracked files present (use "git add" to track)
+```
+
+**Aprobación del revisor:** Aprobado (Revisora Susana): Plan: 2 a crear, 0 a cambiar, 0 a destruir.
 
 ### Respuestas
 1. Pidieron un solo servidor. ¿Cuántos recursos creó el plan y por qué?
