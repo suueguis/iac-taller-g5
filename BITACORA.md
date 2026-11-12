@@ -29,6 +29,8 @@ El grupo es de 2 personas. La guía define cuatro roles y solo prevé fusionarlo
 
 ## Fase 0 · Preparación del entorno
 
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
+
 ### Evidencias
 
 `terraform -version`
@@ -83,8 +85,58 @@ _Esta fase no tiene preguntas._
 
 ## Fase 1 · Arranque: hacerlo a mano
 
+**Roles:** Operadora: Susana · Navegante: Samuel · Revisor: Samuel · Bitácora: Samuel
+
 ### Evidencias
-_Pegar: el primer `docker run`, el error del segundo `docker run`, el resultado con `clickops-g5-2`, y `docker ps -a` al final (sin ningún contenedor `clickops`)._
+> Nota: este equipo tiene otros contenedores personales ajenos al taller. Por eso las salidas de `docker ps` se recortaron a la cabecera y a las filas `clickops` (el resto de filas no se pega; no se tocó ningún otro contenedor).
+
+Primer `docker run`:
+```
+$ docker run -d --name clickops-g5 -p 8090:80 nginx:1.27-alpine
+b7273ff81eb208300cfc200e9b0cde28eae247c59c5befcb8e4c0cf3b16ef617
+
+$ docker ps
+CONTAINER ID   IMAGE                COMMAND                  CREATED        STATUS                       PORTS                                         NAMES
+b7273ff81eb2   nginx:1.27-alpine    "/docker-entrypoint.…"   1 second ago   Up 1 second                  0.0.0.0:8090->80/tcp, [::]:8090->80/tcp       clickops-g5
+
+$ curl -sI http://localhost:8090
+HTTP/1.1 200 OK
+Server: nginx/1.27.5
+```
+
+Segundo `docker run` (mismo comando, mismo nombre):
+```
+$ docker run -d --name clickops-g5 -p 8090:80 nginx:1.27-alpine
+docker: Error response from daemon: Conflict. The container name "/clickops-g5" is already in use by container "b7273ff81eb208300cfc200e9b0cde28eae247c59c5befcb8e4c0cf3b16ef617". You have to remove (or rename) that container to be able to reuse that name.
+
+Run 'docker run --help' for more information
+(código de salida: 125)
+```
+
+Intento con otro nombre (`clickops-g5-2`) y el mismo puerto:
+```
+$ docker run -d --name clickops-g5-2 -p 8090:80 nginx:1.27-alpine
+5e0ab5a00605e157625d3346f62f3515b622dc59cf91ccb60097e1c13062ffed
+docker: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint clickops-g5-2 (ed7af4f616dc542b4a91e6b7148d603dff438c4c548991fe9888d0c344e80352): Bind for 0.0.0.0:8090 failed: port is already allocated
+
+Run 'docker run --help' for more information
+(código de salida: 125)
+
+$ docker ps -a
+CONTAINER ID   IMAGE                COMMAND                  CREATED         STATUS                       PORTS                                         NAMES
+5e0ab5a00605   nginx:1.27-alpine    "/docker-entrypoint.…"   2 seconds ago   Created                                                                    clickops-g5-2
+b7273ff81eb2   nginx:1.27-alpine    "/docker-entrypoint.…"   4 seconds ago   Up 3 seconds                 0.0.0.0:8090->80/tcp, [::]:8090->80/tcp       clickops-g5
+```
+
+Limpieza y `docker ps -a` final (sin contenedores `clickops`):
+```
+$ docker rm -f clickops-g5 clickops-g5-2
+clickops-g5
+clickops-g5-2
+
+$ docker ps -a --filter name=clickops
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+```
 
 **Mismo objetivo de dos formas**
 
