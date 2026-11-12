@@ -999,10 +999,191 @@ Changes to Outputs:
 
 ## Fase 6 · Módulos: la receta una sola vez
 
-### Evidencias
-_Pegar: línea `Plan:` del paso 8, `terraform apply`, `terraform output urls` y `docker ps` con los tres sitios._
+**Roles:** Operador: Samuel · Navegante: Susana · Revisora: Susana · Bitácora: Susana
 
-**Aprobación del revisor:** _(qué se destruye, qué se crea y por qué)_
+### Evidencias
+Se copió todo `material-por-fase/fase-6/infra/` a `infra/` (incluye `modules/sitio_web/` con su `versions.tf`). `terraform init`, `terraform fmt -check -recursive` y `terraform validate` pasaron sin tocar el HCL.
+
+`terraform init`
+```
+Initializing the backend...
+
+Initializing modules...
+- blog in modules\sitio_web
+- tienda in modules\sitio_web
+- docs in modules\sitio_web
+
+Initializing provider plugins...
+- Reusing version 4.7.0 of kreuzwerker/docker from the dependency lock file
+- Using previously-installed kreuzwerker/docker v4.7.0
+
+Terraform has been successfully initialized!
+```
+(Se recortó el texto de ayuda final de `init`.)
+
+`terraform plan -out=fase6.tfplan` (se recortaron con `[...]` las líneas de atributos calculados del contenedor que se destruye)
+```
+Terraform will perform the following actions:
+
+  # docker_container.web will be destroyed
+  # (because docker_container.web is not in configuration)
+  - resource "docker_container" "web" {
+      [...]
+      - name                                        = "web-g5" -> null
+      [...]
+      - ports {
+          - external = 8080 -> null
+          - internal = 80 -> null
+          - ip       = "0.0.0.0" -> null
+          - protocol = "tcp" -> null
+        }
+      [...]
+    }
+
+  # docker_image.nginx will be destroyed
+  # (because docker_image.nginx is not in configuration)
+  - resource "docker_image" "nginx" {
+      - keep_locally = true -> null
+      - name         = "nginx:1.28-alpine" -> null
+      [...]
+    }
+
+  # module.blog.docker_container.this will be created
+  + resource "docker_container" "this" {
+      + name                                        = "blog-g5"
+      + ports {
+          + external = 8082
+          + internal = 80
+          + ip       = "0.0.0.0"
+          + protocol = "tcp"
+        }
+      [...]
+    }
+
+  # module.blog.docker_image.this will be created
+  + resource "docker_image" "this" {
+      + keep_locally = true
+      + name         = "nginx:1.28-alpine"
+      [...]
+    }
+
+  # module.docs.docker_container.this will be created
+  [... mismo patrón: name = "docs-g5", external = 8083 ...]
+
+  # module.docs.docker_image.this will be created
+  [... mismo patrón ...]
+
+  # module.tienda.docker_container.this will be created
+  [... mismo patrón: name = "tienda-g5", external = 8081 ...]
+
+  # module.tienda.docker_image.this will be created
+  [... mismo patrón ...]
+
+Plan: 6 to add, 0 to change, 2 to destroy.
+
+Changes to Outputs:
+  - contenedor = "web-g5" -> null
+  - url        = "http://localhost:8080" -> null
+  + urls       = [
+      + "http://localhost:8081",
+      + "http://localhost:8082",
+      + "http://localhost:8083",
+    ]
+```
+
+`terraform apply "fase6.tfplan"`
+```
+module.docs.docker_image.this: Creating...
+module.blog.docker_image.this: Creating...
+module.tienda.docker_image.this: Creating...
+docker_container.web: Destroying... [id=0d30e8177c96923becacc08156da287fa3464b2dc6370d2758bbbb0bedeaf58a]
+docker_container.web: Destruction complete after 1s
+docker_image.nginx: Destroying... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_image.nginx: Destruction complete after 0s
+module.docs.docker_image.this: Creation complete after 1s [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+module.tienda.docker_image.this: Creation complete after 1s [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+module.blog.docker_image.this: Creation complete after 1s [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+module.blog.docker_container.this: Creating...
+module.docs.docker_container.this: Creating...
+module.tienda.docker_container.this: Creating...
+module.blog.docker_container.this: Creation complete after 2s [id=6c4f4c3d6443b018e84812c27af78430aa1190890f7ab67a983a57eec46496c8]
+module.tienda.docker_container.this: Creation complete after 2s [id=5b63fe5288bb6397431fd0aad792f64391416d341fca35fd74da25224ad8f3ca]
+module.docs.docker_container.this: Creation complete after 2s [id=8ad61cba5c69cabd1cdbf1c7ab7bd0ed313aa02091cf1a1a3bc9c17758432d0b]
+
+Apply complete! Resources: 6 added, 0 changed, 2 destroyed.
+
+Outputs:
+
+red_driver = "bridge"
+urls = [
+  "http://localhost:8081",
+  "http://localhost:8082",
+  "http://localhost:8083",
+]
+```
+
+`terraform output urls`, `docker ps` y comprobación de los tres sitios
+```
+$ terraform output urls
+[
+  "http://localhost:8081",
+  "http://localhost:8082",
+  "http://localhost:8083",
+]
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS        PORTS                  NAMES
+5b63fe5288bb   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up 1 second   0.0.0.0:8081->80/tcp   tienda-g5
+6c4f4c3d6443   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up 1 second   0.0.0.0:8082->80/tcp   blog-g5
+8ad61cba5c69   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up 1 second   0.0.0.0:8083->80/tcp   docs-g5
+
+$ curl -s http://localhost:8081
+<h1>Tienda del grupo 5</h1>
+<p>Sitio tienda-g5, desplegado con Terraform</p>
+$ curl -s http://localhost:8082
+<h1>Blog del grupo 5</h1>
+<p>Sitio blog-g5, desplegado con Terraform</p>
+$ curl -s http://localhost:8083
+<h1>Documentación del grupo 5</h1>
+<p>Sitio docs-g5, desplegado con Terraform</p>
+
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+
+Prueba sin `versions.tf` (en una copia temporal fuera del repositorio, borrando `modules/sitio_web/versions.tf` y `.terraform/`; el repo no se tocó)
+```
+$ terraform init
+Initializing the backend...
+
+Initializing modules...
+- tienda in modules\sitio_web
+- blog in modules\sitio_web
+- docs in modules\sitio_web
+
+Initializing provider plugins...
+- Finding kreuzwerker/docker versions matching "~> 4.6"...
+- Finding latest version of hashicorp/docker...
+- Installing kreuzwerker/docker v4.7.0...
+- Installed kreuzwerker/docker v4.7.0 (self-signed, key ID 0DCE698927DAF8EC)
+Partner and community providers are signed by their developers.
+If you'd like to know more about provider signing, you can read about it here:
+https://developer.hashicorp.com/terraform/cli/plugins/signing
+
+Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider
+hashicorp/docker: provider registry registry.terraform.io does not have a
+provider named registry.terraform.io/hashicorp/docker
+
+Did you intend to use kreuzwerker/docker? If so, you must specify that source
+address in each module which requires that provider. To see which modules are
+currently depending on hashicorp/docker, run the following command:
+    terraform providers
+(código de salida: 1)
+```
+
+**Aprobación del revisor:** Aprobado (Revisora Susana): Plan: 6 a crear, 0 a cambiar, 2 a destruir. Se destruyen `docker_container.web` y `docker_image.nginx` porque ya no están en el código raíz; se crean la imagen y el contenedor de cada uno de los tres usos del módulo (`tienda-g5` en 8081, `blog-g5` en 8082 y `docs-g5` en 8083).
 
 ### Respuestas
 1. Anoten la línea `Plan:` del paso 8. ¿Qué se destruyó, qué se creó y por qué?
