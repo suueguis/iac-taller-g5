@@ -1,0 +1,2 @@
+# Evita que Windows convierta validar.sh a CRLF (bash fallaría con "\r: command not found")
+*.sh text eol=lf
