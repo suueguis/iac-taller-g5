@@ -602,18 +602,238 @@ Server: nginx/1.28.3
 
 ## Fase 4 · Drift: cuando la realidad se desvía
 
+**Roles:** Operador: Samuel · Navegante: Susana · Revisora: Susana · Bitácora: Susana
+
 ### Evidencias
-_Pegar la salida de cada experimento (A, B y C): el `terraform plan` antes de corregir y el resultado después._
+> Nota: en los planes largos se recortaron con `[...]` las líneas de atributos calculados (`(known after apply)`, `-> null`) para que la bitácora sea legible; las líneas que importan para cada experimento (`must_run`, `forces replacement`, `Plan:`) se conservan tal cual salieron.
+
+#### Experimento A · Apagar el contenedor
+
+```
+$ docker stop web-g5
+web-g5
+
+$ docker ps -a --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED              STATUS                              PORTS     NAMES
+5c761c1e3fbb   a8b39bd9cf0f   "/docker-entrypoint.…"   About a minute ago   Exited (0) Less than a second ago             web-g5
+
+$ terraform plan -out=fase4a.tfplan
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_container.web: Refreshing state... [id=5c761c1e3fbb2dba0bc75dbe0fdff476f49b698539dc3ab0501aa5e366a8599e]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # docker_container.web must be replaced
+-/+ resource "docker_container" "web" {
+      [...]
+      ~ exit_code                                   = 0 -> (known after apply)
+      [...]
+      ~ must_run                                    = false -> true
+        name                                        = "web-g5"
+      [...]
+      + ports { # forces replacement
+          + external = 8080 # forces replacement
+          + internal = 80 # forces replacement
+          + ip       = "0.0.0.0" # forces replacement
+          + protocol = "tcp" # forces replacement
+        }
+    }
+
+Plan: 1 to add, 0 to change, 1 to destroy.
+```
+
+Corrección:
+```
+$ terraform apply fase4a.tfplan
+docker_container.web: Destroying... [id=5c761c1e3fbb2dba0bc75dbe0fdff476f49b698539dc3ab0501aa5e366a8599e]
+docker_container.web: Destruction complete after 0s
+docker_container.web: Creating...
+docker_container.web: Creation complete after 1s [id=b2659048374fabe7f6d582d6bfc867a1bb42b9ffb92fe2ab8d64840b5fbe8937]
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS                  PORTS                  NAMES
+b2659048374f   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up Less than a second   0.0.0.0:8080->80/tcp   web-g5
+
+$ curl -sI http://localhost:8080 | head -2
+HTTP/1.1 200 OK
+Server: nginx/1.28.3
+
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+
+#### Experimento B · Borrar el contenedor
+
+```
+$ docker rm -f web-g5
+web-g5
+
+$ docker ps -a --filter name=g5
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+
+$ terraform plan -refresh-only
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_container.web: Refreshing state... [id=b2659048374fabe7f6d582d6bfc867a1bb42b9ffb92fe2ab8d64840b5fbe8937]
+
+Note: Objects have changed outside of Terraform
+
+Terraform detected the following changes made outside of Terraform since the
+last "terraform apply" which may have affected this plan:
+
+  # docker_container.web has been deleted
+  - resource "docker_container" "web" {
+      [...]
+      - name                                        = "web-g5" -> null
+      [...]
+      - ports {
+          - external = 8080 -> null
+          - internal = 80 -> null
+          - ip       = "0.0.0.0" -> null
+          - protocol = "tcp" -> null
+        }
+    }
+
+
+This is a refresh-only plan, so Terraform will not take any actions to undo
+these. If you were expecting these changes then you can apply this plan to
+record the updated values in the Terraform state without changing any remote
+objects.
+
+$ terraform plan -out=fase4b.tfplan
+[...]
+Terraform will perform the following actions:
+
+  # docker_container.web will be created
+  + resource "docker_container" "web" {
+      [...]
+      + image                                       = "sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236"
+      [...]
+      + name                                        = "web-g5"
+      [...]
+      + ports {
+          + external = 8080
+          + internal = 80
+          + ip       = "0.0.0.0"
+          + protocol = "tcp"
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+```
+
+Corrección:
+```
+$ terraform apply fase4b.tfplan
+docker_container.web: Creating...
+docker_container.web: Creation complete after 1s [id=8d7d69643789a473dc29007ae1abb6a5fe04b296f3a389259c581105650842a8]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS                  PORTS                  NAMES
+8d7d69643789   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up Less than a second   0.0.0.0:8080->80/tcp   web-g5
+
+$ curl -sI http://localhost:8080 | head -2
+HTTP/1.1 200 OK
+Server: nginx/1.28.3
+
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
+
+#### Experimento C · Cambiar por dentro
+
+```
+$ curl -s http://localhost:8080 | head -5   (antes)
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+
+$ MSYS_NO_PATHCONV=1 docker exec web-g5 sh -c 'echo "<h1>Modificado a mano - g5</h1>" > /usr/share/nginx/html/index.html'
+
+$ curl -s http://localhost:8080   (después)
+<h1>Modificado a mano - g5</h1>
+
+$ terraform plan
+docker_image.nginx: Refreshing state... [id=sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236nginx:1.28-alpine]
+docker_container.web: Refreshing state... [id=8d7d69643789a473dc29007ae1abb6a5fe04b296f3a389259c581105650842a8]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+
+$ terraform plan -replace=docker_container.web -out=fase4c.tfplan
+[...]
+Terraform will perform the following actions:
+
+  # docker_container.web will be replaced, as requested
+-/+ resource "docker_container" "web" {
+      [...]
+        name                                        = "web-g5"
+      [...]
+    }
+
+Plan: 1 to add, 0 to change, 1 to destroy.
+```
+
+Corrección:
+```
+$ terraform apply fase4c.tfplan
+docker_container.web: Destroying... [id=8d7d69643789a473dc29007ae1abb6a5fe04b296f3a389259c581105650842a8]
+docker_container.web: Destruction complete after 0s
+docker_container.web: Creating...
+docker_container.web: Creation complete after 1s [id=962d621ba780b595488336b53a97afb982520630463657d743ed7223638c097c]
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+
+Outputs:
+
+url = "http://localhost:8080"
+
+$ docker ps --filter name=g5
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS                  PORTS                  NAMES
+962d621ba780   a8b39bd9cf0f   "/docker-entrypoint.…"   1 second ago   Up Less than a second   0.0.0.0:8080->80/tcp   web-g5
+
+$ curl -s http://localhost:8080 | head -5
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+
+$ terraform plan
+No changes. Your infrastructure matches the configuration.
+```
 
 **Aprobación del revisor (por experimento):**
+- A — Aprobado (Revisora Susana): Plan: 1 a crear, 0 a cambiar, 1 a destruir.
+- B — Aprobado (Revisora Susana): Plan: 1 a crear, 0 a cambiar, 0 a destruir.
+- C — Aprobado (Revisora Susana): Plan: 1 a crear, 0 a cambiar, 1 a destruir (con `-replace=docker_container.web`).
 
 ### Tabla de drift
 
 | Experimento | ¿El plan lo detectó? | ¿Qué propuso Terraform? | ¿Cómo quedó corregido? |
 |---|---|---|---|
-| A · Apagar | | | |
-| B · Borrar | | | |
-| C · Cambiar por dentro | | | |
+| A · Apagar | Sí: `must_run = false -> true` y `exit_code = 0` (el contenedor existía pero estaba apagado) | Reemplazar el contenedor (`-/+`, `forces replacement` en `ports`): `Plan: 1 to add, 0 to change, 1 to destroy` | `terraform apply fase4a.tfplan`: contenedor recreado, `docker ps` lo muestra `Up` y `curl` responde `200 OK` |
+| B · Borrar | Sí: `docker_container.web has been deleted` (con `plan -refresh-only` solo informa; con `plan` propone volver) | Crear de nuevo el contenedor: `Plan: 1 to add, 0 to change, 0 to destroy` | `terraform apply fase4b.tfplan`: contenedor creado, `curl` responde `200 OK` |
+| C · Cambiar por dentro | No: `terraform plan` dijo `No changes` aunque `curl` ya mostraba otra página | Nada con `plan` normal. Con `-replace=docker_container.web`: `Plan: 1 to add, 0 to change, 1 to destroy` | `terraform apply fase4c.tfplan`: contenedor recreado y `curl` volvió a mostrar «Welcome to nginx!» |
 
 ### Respuestas
 1. ¿Por qué Terraform no detectó el experimento C? ¿Qué tipo de herramienta de la diapositiva «Aprovisionar ≠ configurar» se encarga de ese nivel?
